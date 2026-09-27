@@ -1,0 +1,6 @@
+{
+  "appId": "com.tacoder.malialkalimat",
+  "appName": "مَلّي الكلمات",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" }
+}

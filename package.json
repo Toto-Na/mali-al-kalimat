@@ -1,0 +1,29 @@
+{
+  "name": "mali-al-kalimat",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server.js",
+    "server": "node server.js",
+    "android:add": "npx cap add android",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/share": "^7.0.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "@vitejs/plugin-react": "^5.0.2",
+    "vite": "^7.1.7"
+  }
+}

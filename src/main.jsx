@@ -1,0 +1,61 @@
+import React,{useEffect,useMemo,useRef,useState}from'react';
+import{createRoot}from'react-dom/client';
+import{Share}from'@capacitor/share';
+import'./styles.css';
+
+const iconForLabel=(label)=>{const k=label.trim().toLowerCase(); const m={'ولد':'👦','بنت':'👧','مدينة':'🏙️','بلد':'🌍','بلاد':'🌍','أكلة':'🍽️','اكل':'🍽️','أكلة':'🍽️','مهنة':'💼','سيارة':'🚗','لون':'🎨','فاكهة':'🍎','خضار':'🥕','شراب':'🥤','حيوان':'🐾','نبات':'🌿','جماد':'📦','اسم':'👤'}; return m[k]||'📋'};
+const DEFAULT_COLUMNS=[{id:'name',label:'اسم',icon:'👤'},{id:'plant',label:'نبات',icon:'🌿'},{id:'animal',label:'حيوان',icon:'🐾'},{id:'thing',label:'جماد',icon:'📦'},{id:'country',label:'بلاد',icon:'🌍'}];
+const SERVER_URL=import.meta.env.VITE_SERVER_URL||'';
+const wsUrl=()=>SERVER_URL?SERVER_URL.replace(/^http:/,'ws:').replace(/^https:/,'wss:'):`${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
+const params=()=>{const p=new URLSearchParams(location.search);return{room:(p.get('room')||'').toUpperCase(),name:p.get('name')||''}};
+function App(){
+ const preset=useMemo(params,[]),sock=useRef(null);
+ const[screen,setScreen]=useState(preset.room?'join':'home'),[name,setName]=useState(preset.name),[room,setRoom]=useState(preset.room);
+ const[players,setPlayers]=useState([]),[hostId,setHostId]=useState(''),[me,setMe]=useState(''),[letter,setLetter]=useState(''),[round,setRound]=useState(1),[seconds,setSeconds]=useState(60),[deadline,setDeadline]=useState(0),[answers,setAnswers]=useState({}),[submitted,setSubmitted]=useState(false),[results,setResults]=useState(null),[columns,setColumns]=useState(DEFAULT_COLUMNS),[message,setMessage]=useState(''),[connecting,setConnecting]=useState(false),[copied,setCopied]=useState(false),[roundSeconds,setRoundSeconds]=useState(60);
+ const isHost=me&&me===hostId;
+ const connect=(action,code='',playerName=name)=>{
+  if(connecting)return;
+  if(action==='join'&&!String(code).trim())return setMessage('أدخلي رمز الغرفة.');
+  if(!playerName.trim())return setMessage('اكتبي اسمك أولًا.');
+  setMessage('جاري الاتصال...');setConnecting(true);
+  const s=new WebSocket(wsUrl());sock.current=s;
+  s.onopen=()=>s.send(JSON.stringify({action,room:String(code).trim().toUpperCase(),name:playerName.trim()}));
+  s.onmessage=e=>{const m=JSON.parse(e.data);
+   if(m.type==='error'){setMessage(m.message);setConnecting(false);s.close();return}
+   if(m.type==='room'){setConnecting(false);setRoom(m.room);setMe(m.playerId);setHostId(m.hostId);setPlayers(m.players);setRoundSeconds(m.roundSeconds||60);setColumns(m.columns||DEFAULT_COLUMNS);setScreen('lobby');setMessage('');history.replaceState({},'',`?room=${m.room}&name=${encodeURIComponent(playerName.trim())}`)}
+   if(m.type==='players'){setPlayers(m.players);setHostId(m.hostId)}
+   if(m.type==='columns')setColumns(m.columns||DEFAULT_COLUMNS);
+   if(m.type==='game'){setLetter(m.letter);setRound(m.round);setSeconds(m.seconds);setDeadline(m.deadline);setAnswers({});setSubmitted(false);setResults(null);setScreen('game');setColumns(m.columns||DEFAULT_COLUMNS)}
+   if(m.type==='tick'){setSeconds(m.seconds);setDeadline(m.deadline)}
+   if(m.type==='roundResult'){setResults(m.results);setColumns(m.columns||columns);setSeconds(0);setDeadline(0);setScreen('result')}
+  };
+  s.onerror=()=>{setConnecting(false);setMessage('تعذر الاتصال بالسيرفر. تأكدي أن السيرفر يعمل.')};
+ };
+ useEffect(()=>()=>sock.current?.close(),[]);
+ useEffect(()=>{if(screen!=='game'||!deadline)return;const id=setInterval(()=>setSeconds(Math.max(0,Math.ceil((deadline-Date.now())/1000))),250);return()=>clearInterval(id)},[screen,deadline]);
+ const send=x=>sock.current?.readyState===1&&sock.current.send(JSON.stringify(x));
+ const create=()=>connect('create','',name),join=()=>connect('join',room,name);
+ const start=()=>send({action:'start',seconds:roundSeconds});
+ const submit=()=>{if(submitted)return;const empty=columns.filter(c=>!String(answers[c.id]||'').trim());if(empty.length){const names=empty.map(c=>c.label).join('، ');if(!window.confirm(`هناك خانات فارغة: ${names}\nهل تريدين التسليم رغم الفراغ؟`))return}setSubmitted(true);send({action:'submit',answers})};
+ const next=()=>send({action:'next'});
+ const setCols=c=>{setColumns(c);send({action:'setColumns',columns:c})};
+ const share=async()=>{const url=`${location.origin}${location.pathname}?room=${room}`;try{await Share.share({title:'مَلّي الكلمات',text:`انضمي إلى غرفة ${room} في مَلّي الكلمات`,url})}catch{try{await navigator.clipboard.writeText(url);setCopied(true);setTimeout(()=>setCopied(false),1800)}catch{}}};
+ const leave=()=>{send({action:'leave'});sock.current?.close();setScreen('home');setPlayers([]);setRoom('');history.replaceState({},'',location.pathname)};
+ if(screen==='join')return <Join {...{name,setName,room,setRoom,join,connecting,message,preset}}/>;
+ if(screen==='lobby')return <Lobby {...{room,players,host:isHost,start,share,copied,leave,roundSeconds,setRoundSeconds,columns,setCols}}/>;
+ if(screen==='game')return <Game {...{room,letter,round,seconds,answers,setAnswers,submit,submitted,players,columns}}/>;
+ if(screen==='result')return <Result {...{results,me,next,host:isHost,leave,columns}}/>;
+ return <Home {...{name,setName,create,room,setRoom,join,connecting,message}}/>;
+}
+function Brand(){return <div className="brand"><div className="brandMark">م</div><div><strong>مَلّي الكلمات</strong><span>لعبة جماعية مباشرة</span></div></div>}
+function Home({name,setName,create,room,setRoom,join,connecting,message}){return <main className="shell home"><Brand/><div className="hero"><div className="heroBadge">🎮 العبوا من أي هاتف</div><h1>اكتبي كلمة…<br/><em>وخلي السرعة تحكم!</em></h1><p>أضيفوا الأعمدة التي تريدونها والعبوا معًا في نفس الغرفة.</p></div><section className="panel"><label><span>اسمك داخل اللعبة</span><input value={name} maxLength={24} onChange={e=>setName(e.target.value)} placeholder="مثال: تغريد"/></label><button className="primary" disabled={connecting} onClick={create}>{connecting?'جاري الاتصال…':'إنشاء غرفة جديدة'} <b>→</b></button><div className="or"><i/> أو <i/></div><div className="joinBox"><input value={room} maxLength={6} onChange={e=>setRoom(e.target.value.toUpperCase())} placeholder="رمز الغرفة"/><button onClick={join}>انضمام</button></div>{message&&<div className="alert">{message}</div>}</section></main>}
+function Join({name,setName,room,setRoom,join,connecting,message,preset}){return <main className="shell centered"><Brand/><section className="panel joinPanel"><div className="roomPill">غرفة <b>{room}</b></div><h1>جاهزة للعب؟</h1><p>{preset?'تم التعرف على الغرفة من الرابط. اكتبي اسمك وادخلي.':'أدخلي بيانات الغرفة.'}</p><label><span>اسم اللاعب</span><input autoFocus value={name} maxLength={24} onChange={e=>setName(e.target.value)} placeholder="اكتبي اسمك"/></label><label><span>رمز الغرفة</span><input value={room} maxLength={6} onChange={e=>setRoom(e.target.value.toUpperCase())} disabled={preset}/></label><button className="primary" disabled={connecting} onClick={join}>{connecting?'جاري الدخول…':'دخول اللعبة'} <b>→</b></button>{message&&<div className="alert">{message}</div>}</section></main>}
+function Lobby({room,players,host,start,share,copied,leave,roundSeconds,setRoundSeconds,columns,setCols}){
+ const[newCol,setNewCol]=useState('');
+ const add=()=>{const v=newCol.trim();if(!v)return;if(columns.length>=12)return;setCols([...columns,{id:`custom_${Date.now()}`,label:v.slice(0,24),icon:iconForLabel(v)}]);setNewCol('')};
+ const remove=id=>setCols(columns.filter(c=>c.id!==id));
+ return <main className="shell"><header className="nav"><Brand/><button className="ghost" onClick={leave}>خروج</button></header><section className="lobbyHero"><div><span className="eyebrow">رمز الغرفة</span><div className="roomCode">{room}</div><p>شاركي الرمز أو رابط الدعوة مع اللاعبين.</p></div><button className="share" onClick={share}>{copied?'✓ تم النسخ':'🔗 مشاركة الدعوة'}</button></section><section className="panel playersPanel"><div className="sectionHead"><h2>اللاعبون <small>{players.length}/20</small></h2><span className="live"><i/> مباشر</span></div><div className="playerGrid">{players.map((p,i)=><div className="playerCard" key={p.id}><div className="avatar">{p.name[0]}</div><div><b>{p.name}</b><span>{p.host?'👑 المضيف':'لاعب'}</span></div><strong>{i+1}</strong></div>)}</div>{host&&<><div className="settingsBox"><div><b>⏱️ وقت الجولة</b><small>يحدده المشرف</small></div><select value={roundSeconds} onChange={e=>setRoundSeconds(Number(e.target.value))}><option value={15}>15 ثانية</option><option value={30}>30 ثانية</option><option value={45}>45 ثانية</option><option value={60}>60 ثانية</option><option value={90}>90 ثانية</option><option value={120}>دقيقتان</option><option value={180}>3 دقائق</option><option value={300}>5 دقائق</option></select></div><div className="columnEditor"><div className="sectionHead"><h2>أعمدة الجولة <small>{columns.length}/12</small></h2></div><div className="columnChips">{columns.map(c=><span className="chip" key={c.id}>{c.icon} {c.label}{columns.length>1&&<button onClick={()=>remove(c.id)}>×</button>}</span>)}</div><div className="addColumn"><input value={newCol} maxLength={24} onChange={e=>setNewCol(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} placeholder="مثال: ولد، بنت، مدينة، أكلة..."/><button onClick={add} disabled={columns.length>=12}>+ إضافة</button></div><small className="hint">يمكن إضافة حتى 12 عمودًا. التعديلات تظهر لجميع اللاعبين.</small></div><button className="primary start" onClick={start}>ابدأ الجولة — {roundSeconds} ثانية <b>→</b></button></>}{!host&&<div className="waiting"><span className="loader"/> بانتظار المضيف لتحديد الوقت والأعمدة وبدء الجولة…</div>}</section></main>
+}
+function Game({room,letter,round,seconds,answers,setAnswers,submit,submitted,players,columns}){return <main className="shell"><header className="nav"><div><span className="eyebrow">الجولة {round}</span><strong>غرفة {room}</strong></div><div className={`timer ${seconds<=10?'danger':''}`}><span>الوقت</span><b>{seconds}</b><small>ثانية</small></div></header><section className="gameHero"><p>الحرف هو</p><div className="letter">{letter}</div><h1>اكتبي أسرع ما يخطر ببالك</h1></section><section className="answerGrid">{columns.map(c=><label className="answerCard" key={c.id}><span>{c.icon}</span><div><b>{c.label}</b><input disabled={submitted} value={answers[c.id]||''} onChange={e=>setAnswers({...answers,[c.id]:e.target.value})} placeholder={`كلمة تبدأ بـ ${letter}`}/></div></label>)}</section><button className="primary submit" disabled={submitted} onClick={submit}>{submitted?'✓ تم تسليم إجاباتك':'تسليم الإجابات'} <b>→</b></button><div className="submittedCount">{players.filter(p=>p.submitted).length} من {players.length} سلّموا إجاباتهم</div></main>}
+function Result({results,me,next,host,leave,columns}){const mine=results?.find(x=>x.id===me);return <main className="shell resultPage"><div className="resultIcon">🏆</div><span className="eyebrow">انتهت الجولة</span><h1>نتائج الجولة</h1><div className="myScore"><span>نقاطك</span><b>{mine?.score||0}</b><small>من {columns.length*10}</small></div><section className="panel ranking"><div className="sectionHead"><h2>نتائج الجميع</h2><span>الإجابات والنقاط بالتفصيل</span></div>{(results||[]).map((r,i)=><div className={`resultPlayer ${r.id===me?'mine':''}`} key={r.id}><div className="rankRow"><span className="rankNo">{i+1}</span><div className="rankAvatar">{r.name[0]}</div><div className="rankName"><b>{r.name}{r.id===me?' — أنتِ':''}</b><small>{r.score} نقطة</small></div><strong>{r.score}</strong></div><div className="answerResultGrid">{columns.map(c=>{const d=r.details?.[c.id]||{answer:r.answers?.[c.id]||'',points:0};return <div className={`answerResult ${d.points===5?'duplicate':''} ${d.points===0?'zero':''}`} key={c.id}><div><span>{c.icon}</span><b>{c.label}</b></div><strong>{d.answer||'—'}</strong><small>{d.points===10?'10 نقاط — صحيحة':d.points===5?'5 نقاط — كلمة مكررة':d.empty?'0 نقطة — فارغة':d.reason==='حرف واحد فقط'?'0 نقطة — حرف واحد فقط':'0 نقطة — غير صحيحة'}</small></div>})}</div></div>)}</section>{host?<button className="primary" onClick={next}>الجولة التالية <b>→</b></button>:<div className="waiting">بقيادة المضيف… الجولة التالية ستبدأ عند ضغطه.</div>}<button className="textBtn" onClick={leave}>إنهاء والعودة للبداية</button></main>}
+createRoot(document.getElementById('root')).render(<App/>);
